@@ -6,6 +6,8 @@ name: Setup Prerequisites
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
   setup-tools:
@@ -36,8 +38,8 @@ jobs:
           sudo curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
           echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernet
 
-      - name: Trigger deploy-infra workflow
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.REPO_DISPATCH_PAT }}
-          event-type: deploy-infra
+      # - name: Trigger deploy-infra workflow
+      #   uses: peter-evans/repository-dispatch@v3
+      #   with:
+      #     token: ${{ secrets.REPO_DISPATCH_PAT }}
+      #     event-type: deploy-infra

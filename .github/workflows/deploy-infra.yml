@@ -47,6 +47,11 @@ jobs:
         service_account_key: ${{ env.GKE_SA_KEY }}
         export_default_credentials: true
 
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+          terraform_version: 1.0.0
+          
     - name: Terraform Init
       working-directory: ./terraform
       run: |

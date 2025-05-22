@@ -1,0 +1,44 @@
+name: Deploy GKE Infrastructure
+
+on:
+  repository_dispatch:
+    types: [deploy-infra]
+
+jobs:
+  deploy-infra:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GKE_SA_KEY: ${{ secrets.GKE_SA_KEY }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure GCP Credentials
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ env.GKE_SA_KEY }}
+          export_default_credentials: true
+
+      - name: Terraform Plan
+        working-directory: ./terraform
+        run: terraform plan -var="project_id=${{ env.PROJECT_ID }}" -var="cluster_name=my-new-env"
+
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: terraform apply -auto-approve -var="project_id=${{ env.PROJECT_ID }}" -var="cluster_name=my-new-env"
+
+      - name: Save Kubeconfig
+        working-directory: ./terraform
+        run: |
+          gcloud container clusters get-credentials my-new-env --region $(terraform output -raw region)
+          mkdir -p $HOME/.kube
+          cp $HOME/.kube/config $HOME/.kube/gke-config
+          echo "KUBE_CONFIG=$(cat $HOME/.kube/gke-config | base64 | tr -d '\n')" >> $GITHUB_ENV
+
+      - name: Store Kubeconfig
+        uses: actions/upload-artifact@v3
+        with:
+          name: kubeconfig
+          path: $HOME/.kube/gke-config

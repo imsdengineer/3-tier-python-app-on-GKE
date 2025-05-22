@@ -1,0 +1,59 @@
+# Frontend service - now using LoadBalancer
+frontend:
+  replicaCount: 1
+  image:
+    repository: your-repo/python-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: LoadBalancer  # Changed from ClusterIP to LoadBalancer
+    port: 8000
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+# Backend service remains ClusterIP
+backend:
+  replicaCount: 1
+  image:
+    repository: your-repo/python-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 5000
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+# Database
+postgresql:
+  enabled: true
+  image:
+    tag: 13-alpine
+  auth:
+    postgresPassword: "dbpassword"
+    database: "appdb"
+    username: "appuser"
+    password: "apppassword"
+  persistence:
+    size: 10Gi
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+# Disabled ingress for now
+ingress:
+  enabled: false

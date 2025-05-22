@@ -1,0 +1,51 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Chart.Name }}-postgresql
+  labels:
+    app: {{ .Chart.Name }}-postgresql
+    chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+spec:
+  serviceName: {{ .Chart.Name }}-postgresql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Chart.Name }}-postgresql
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}-postgresql
+    spec:
+      containers:
+        - name: postgresql
+          image: postgres:{{ .Values.postgresql.image.tag }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+              name: postgresql
+          env:
+            - name: POSTGRES_DB
+              value: "{{ .Values.postgresql.auth.database }}"
+            - name: POSTGRES_USER
+              value: "{{ .Values.postgresql.auth.username }}"
+            - name: POSTGRES_PASSWORD
+              value: "{{ .Values.postgresql.auth.password }}"
+          volumeMounts:
+            - name: postgresql-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            {{- toYaml .Values.postgresql.resources | nindent 12 }}
+      volumes:
+        - name: postgresql-data
+          persistentVolumeClaim:
+            claimName: postgresql-pvc
+  volumeClaimTemplates:
+    - metadata:
+        name: postgresql-data
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: {{ .Values.postgresql.persistence.size }}
+{{- end }}

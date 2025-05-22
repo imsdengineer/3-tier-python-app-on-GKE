@@ -1,0 +1,50 @@
+
+## Prerequisites
+
+- Google Cloud Platform (GCP) account
+- GitHub account
+- MS Teams channel for notifications
+- Basic understanding of Kubernetes, Helm, and Terraform
+
+## Setup Instructions
+
+### 1. GCP Configuration
+1. Create a GCP project and enable the following APIs:
+   - Kubernetes Engine API
+   - Compute Engine API
+2. Create a service account with appropriate permissions
+3. Generate and download the service account key (JSON)
+
+### 2. GitHub Secrets Setup
+Add the following secrets to your GitHub repository:
+- `GCP_PROJECT_ID`: Your GCP project ID
+- `GKE_SA_KEY`: Base64 encoded service account key JSON
+- `MS_TEAMS_WEBHOOK`: MS Teams incoming webhook URL
+
+### 3. Workflow Execution Order
+1. **Setup Prerequisites**: Manually trigger `1-setup-prerequisites.yml`
+2. **Deploy Infrastructure**: Auto-triggered on Terraform changes or manually via `2-deploy-infra.yml`
+3. **Deploy Application**: Auto-triggered on Helm changes or manually via `3-deploy-app.yml`
+
+## Application Architecture
+
+### Three-Tier Components
+1. **Frontend**: Python web service (LoadBalancer)
+   - Port: 8000
+   - Externally accessible
+2. **Backend**: Python API service (ClusterIP)
+   - Port: 5000
+   - Internal only
+3. **Database**: PostgreSQL (StatefulSet)
+   - Persistent storage
+   - Internal only
+
+## Accessing the Application
+
+After successful deployment:
+```bash
+# Get the external IP of the frontend service
+kubectl get svc three-tier-app-frontend
+
+# Access the application
+curl http://<EXTERNAL_IP>:8000

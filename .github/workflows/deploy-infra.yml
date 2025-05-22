@@ -56,11 +56,21 @@ jobs:
       working-directory: ./terraform
       run: |
         terraform init
-        terraform workspace select default || true
-        terraform workspace delete $TF_WORKSPACE
-        terraform workspace new $TF_WORKSPACE || true
-        terraform workspace select $TF_WORKSPACE
-
+        
+        # Switch to default workspace first if needed
+        if terraform workspace list | grep -q "$TF_WORKSPACE"; then
+          echo "Workspace $TF_WORKSPACE exists - selecting default first"
+          terraform workspace select default || true
+          terraform workspace delete "$TF_WORKSPACE" || echo "Workspace deletion failed, continuing..."
+        fi
+        
+        # Create new workspace (will succeed if already exists due to || true)
+        terraform workspace new "$TF_WORKSPACE" || true
+        terraform workspace select "$TF_WORKSPACE"
+        
+        # Verify current workspace
+        echo "Current workspace: $(terraform workspace show)"
+        
     - name: Terraform Plan
       working-directory: ./terraform
       run: |

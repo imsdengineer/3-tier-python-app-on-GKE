@@ -39,5 +39,5 @@ jobs:
       - name: Trigger deploy-infra workflow
         uses: peter-evans/repository-dispatch@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.REPO_DISPATCH_PAT }}
           event-type: deploy-infra

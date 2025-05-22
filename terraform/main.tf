@@ -1,3 +1,35 @@
+# -----------------------------------------------------------------------------
+# GKE Private Cluster and Network Configuration
+# Configured for access from a self-hosted runner within the same VPC subnet.
+# Assumes an existing VPC network.
+# -----------------------------------------------------------------------------
+data "google_compute_network" "vpc" {
+  name    = "${var.cluster_name}-vpc" # Reference the existing VPC by its name
+  project = var.project_id
+}
+
+# Subnet for the GKE cluster (and your self-hosted runner)
+# This subnet will still be created by Terraform, as it's specific to this GKE deployment.
+resource "google_compute_subnetwork" "subnet" {
+  name                     = "${var.cluster_name}-subnet"
+  ip_cidr_range            = "10.2.0.0/16"
+  region                   = var.region
+  # CHANGE: Referencing the existing VPC via the 'data' block
+  network                  = data.google_compute_network.vpc.self_link
+  project                  = var.project_id
+  private_ip_google_access = true # Enable Private Google Access for nodes to reach Google APIs privately
+
+  # Secondary IP ranges for GKE pods and services (IP aliasing)
+  secondary_ip_range {
+    range_name    = "k8s-pod-range"
+    ip_cidr_range = "10.48.0.0/14" # Example range for pods
+  }
+  secondary_ip_range {
+    range_name    = "k8s-service-range"
+    ip_cidr_range = "10.52.0.0/20" # Example range for services
+  }
+}
+
 # --- GKE Cluster Resources ---
 resource "google_container_cluster" "private_cluster" {
   name                     = var.cluster_name

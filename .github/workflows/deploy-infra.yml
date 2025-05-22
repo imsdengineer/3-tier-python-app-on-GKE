@@ -56,6 +56,7 @@ jobs:
       working-directory: ./terraform
       run: |
         terraform init
+        terraform workspace select default || true
         terraform workspace delete $TF_WORKSPACE
         terraform workspace new $TF_WORKSPACE || true
         terraform workspace select $TF_WORKSPACE

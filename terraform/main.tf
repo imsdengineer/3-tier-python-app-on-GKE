@@ -22,8 +22,8 @@ resource "google_container_cluster" "private_cluster" {
 
   master_authorized_networks_config {
     cidr_blocks {
-      cidr_block   = "0.0.0.0/0"
-      display_name = "public-access"
+      cidr_block   = "172.16.0.0/28"
+      display_name = "private-access"
     }
   }
 }

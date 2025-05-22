@@ -12,7 +12,7 @@ on:
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GKE_SA_KEY: ${{ secrets.GKE_SA_KEY }}
-  TF_WORKSPACE: "my-new-env"  # Terraform workspace name
+  TF_WRKSPACE: "my-new-env"  # Terraform workspace name
 
 jobs:
   setup:

@@ -28,6 +28,11 @@ jobs:
           project_id: ${{ env.PROJECT_ID }}
           install_components: 'gke-gcloud-auth-plugin'
 
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.0.0
+          
       - name: Terraform Init
         working-directory: ./terraform
         run: terraform init

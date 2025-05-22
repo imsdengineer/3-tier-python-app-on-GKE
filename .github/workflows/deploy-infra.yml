@@ -1,9 +1,19 @@
+
+# -----------------------------------------------------------------------------
 ##      V1.0.1        Imran Ali         Updated Workflow with auth + fixes     22/05/2025
+#       V1.0.5        Imran Ali         Updated Workflow for GCE Self-Hosted Runner
+# -----------------------------------------------------------------------------
 
 name: Deploy GKE Infrastructure
 
 on:
   workflow_dispatch:
+    inputs:
+      destroy:
+        description: 'Set to true to destroy the GKE infrastructure. Requires manual trigger.'
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [ main ]
     paths:
@@ -11,10 +21,15 @@ on:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  GKE_SA_KEY: ${{ secrets.GKE_SA_KEY }}
-  TF_WRKSPACE: "my-new-env"  # Terraform workspace name
+  GKE_SA_KEY: ${{ secrets.GKE_SA_KEY }} # This SA key is for the GitHub Actions environment,
+                                        # not the GCE runner itself (which uses its attached SA).
+  TF_WRKSPACE: "my-new-env" # Terraform workspace name
 
 jobs:
+  # The 'setup' job can still run on a GitHub-hosted runner for initial checks
+  # or if you prefer to set up Terraform/gcloud outside your private network.
+  # However, if your 'terraform init' needs private GCS bucket for state,
+  # this job would also need to run on a self-hosted runner.
   setup:
     runs-on: ubuntu-latest
     steps:
@@ -31,29 +46,44 @@ jobs:
       with:
         project_id: ${{ env.PROJECT_ID }}
         service_account_key: ${{ env.GKE_SA_KEY }}
-        export_default_credentials: true
+        export_default_credentials: true # Exports credentials for subsequent steps/jobs if they run on same runner
 
   deploy-infra:
     needs: setup
-    runs-on: ubuntu-latest
+    # --- CHANGE: Use your self-hosted runner with the specific label ---
+    runs-on: self-hosted, gcp-gke-runner
+    outputs:
+      cluster_name: ${{ steps.terraform-output.outputs.cluster_name }}
+      cluster_endpoint: ${{ steps.terraform-output.outputs.cluster_endpoint }}
+      region: ${{ steps.terraform-output.outputs.region }}
+      subnet_cidr: ${{ steps.terraform-output.outputs.subnet_cidr_range }} # Output the subnet CIDR for reference
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v4 # Required as this is a new runner instance
 
-    - name: Set up gcloud SDK with GKE Auth Plugin
-      uses: google-github-actions/setup-gcloud@v2 # Use v2 for latest features and stability
+    - name: Configure GCP Credentials (on self-hosted runner)
+      # The GCE instance itself has a Service Account attached which is used for auth.
+      # This step primarily ensures 'gcloud' is configured and the GKE auth plugin is present.
+      uses: google-github-actions/setup-gcloud@v2
       with:
         project_id: ${{ env.PROJECT_ID }}
-        # Crucially, install the gke-gcloud-auth-plugin component.
-        # This plugin is required for 'gcloud container clusters get-credentials'
-        # to correctly handle private cluster access (e.g., --internal-ip).
-        install_components: 'gke-gcloud-auth-plugin'
-    
+        # The 'service_account_key' is NOT strictly needed here if the GCE instance has a SA attached
+        # with sufficient permissions and 'export_default_credentials: true' is implicit.
+        # Keeping it doesn't hurt and provides explicit authentication for the action.
+        service_account_key: ${{ env.GKE_SA_KEY }}
+        export_default_credentials: true
+        install_components: 'gke-gcloud-auth-plugin' # Ensures 'gcloud container clusters get-credentials' works
+
     - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v2
+      uses: hashicorp/setup-terraform@v3 # CHANGE: Updated to v3 for consistency
       with:
-          terraform_version: 1.0.0
-          
+        terraform_version: "1.5.7" # CHANGE: Consistent Terraform version
+
+    # --- REMOVED: Step to get GitHub Actions IP Ranges is no longer needed ---
+    # - name: Get GitHub Actions IP Ranges
+    #   id: github_ips
+    #   run: ...
+
     - name: Terraform Init
       working-directory: ./terraform
       run: |
@@ -61,54 +91,100 @@ jobs:
         # Create new workspace (will succeed if already exists due to || true)
         terraform workspace new "$TF_WRKSPACE" || true
         terraform workspace select "$TF_WRKSPACE"
-        
-        # Verify current workspace
         echo "Current workspace: $(terraform workspace show)"
-        
+
     - name: Terraform Plan
       working-directory: ./terraform
       run: |
-        terraform plan -var="project_id=${{ env.PROJECT_ID }}" \
-                      -var="cluster_name=my-new-env" \
-                      -refresh=true \
-                      -out=tfplan
+        # --- CHANGE: Removed 'github_actions_cidrs' variable from terraform plan ---
+        # The master_authorized_networks_config in main.tf now uses the subnet CIDR,
+        # which is inherently authorized by the runner's location.
+        terraform plan \
+          -var="project_id=${{ env.PROJECT_ID }}" \
+          -var="cluster_name=my-new-env" \
+          -refresh=true \
+          -out=tfplan
 
     - name: Terraform Apply
       working-directory: ./terraform
       run: |
         terraform apply -auto-approve -refresh=true tfplan
 
-    - name: Configure Private Cluster Access
+    - name: Get Terraform Outputs
+      id: terraform-output
       working-directory: ./terraform
       run: |
-        # Get cluster details
-        CLUSTER_NAME=$(terraform output -raw cluster_name)
-        REGION=$(terraform output -raw region)
-        
-        # Configure private cluster access
-        gcloud container clusters get-credentials $CLUSTER_NAME \
-          --region $REGION \
-          --internal-ip
-        
-        # Create minimal kubeconfig
-        kubectl config view --minify --flatten > kubeconfig-private.yaml
-        
-        # Store kubeconfig
-        echo "KUBE_CONFIG=$(cat kubeconfig-private.yaml | base64 -w 0)" >> $GITHUB_ENV
-        mkdir -p $HOME/.kube
-        cp kubeconfig-private.yaml $HOME/.kube/gke-config
+        echo "cluster_name=$(terraform output -raw cluster_name)" >> $GITHUB_OUTPUT
+        echo "cluster_endpoint=$(terraform output -raw cluster_endpoint)" >> $GITHUB_OUTPUT
+        echo "region=$(terraform output -raw region)" >> $GITHUB_OUTPUT
+        # CHANGE: Output the subnet CIDR range
+        echo "subnet_cidr_range=$(terraform output -raw subnet_cidr_range)" >> $GITHUB_OUTPUT
 
-    - name: Upload Kubeconfig
+    - name: Configure GKE Cluster Access
+      # This step should now reliably succeed because the runner is within the authorized network (subnet).
+      run: |
+        CLUSTER_NAME="${{ steps.terraform-output.outputs.cluster_name }}"
+        REGION="${{ steps.terraform-output.outputs.region }}"
+        PROJECT_ID="${{ env.PROJECT_ID }}"
+        SUBNET_CIDR="${{ steps.terraform-output.outputs.subnet_cidr_range }}"
+
+        echo "Attempting to get GKE credentials from authorized subnet: ${SUBNET_CIDR}"
+        # CHANGE: Removed --internal-ip. Since enable_private_endpoint = true,
+        # the cluster has a public endpoint that the runner (in the authorized subnet) can reach.
+        gcloud container clusters get-credentials "$CLUSTER_NAME" \
+          --region "$REGION" \
+          --project "$PROJECT_ID" \
+          --zone "$REGION-c" # Assuming zonal for get-credentials, adjust if using regional clusters
+
+        # Verify cluster access
+        echo "Verifying kubectl access..."
+        kubectl cluster-info
+        kubectl get nodes
+
+        kubectl config view --minify --flatten > kubeconfig.yaml
+        mkdir -p $HOME/.kube
+        cp kubeconfig.yaml $HOME/.kube/gke-config
+
+    - name: Upload Kubeconfig (Optional, for debugging/manual access)
       uses: actions/upload-artifact@v4
       with:
         name: kubeconfig
         path: $HOME/.kube/gke-config
         retention-days: 1
 
+  deploy-webapps:
+    needs: deploy-infra # Depends on infrastructure being ready
+    # --- CHANGE: Use your self-hosted runner ---
+    runs-on: self-hosted, gcp-gke-runner
+    steps:
+    - name: Checkout application code
+      uses: actions/checkout@v4
+
+    - name: Configure GCP Credentials (on self-hosted runner)
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        project_id: ${{ env.PROJECT_ID }}
+        service_account_key: ${{ env.GKE_SA_KEY }} # Can remove if GCE SA has full permissions
+        export_default_credentials: true
+        install_components: 'gke-gcloud-auth-plugin'
+
+    - name: Get GKE Credentials for kubectl
+      run: |
+        CLUSTER_NAME="${{ needs.deploy-infra.outputs.cluster_name }}"
+        REGION="${{ needs.deploy-infra.outputs.region }}"
+        PROJECT_ID="${{ env.PROJECT_ID }}"
+
+        # Ensure gcloud CLI is authenticated and configured correctly
+        gcloud container clusters get-credentials "$CLUSTER_NAME" \
+          --region "$REGION" \
+          --project "$PROJECT_ID" \
+          --zone "$REGION-c" # Adjust if using regional clusters
+
   # destroy-on-demand:
   #   if: github.event.inputs.destroy == 'true'
-  #   needs: setup
-  #   runs-on: ubuntu-latest
+  #   needs: setup # Only needs basic setup for credentials
+  #   # --- CHANGE: Use your self-hosted runner ---
+  #   runs-on: self-hosted, gcp-gke-runner
   #   steps:
   #   - name: Checkout code
   #     uses: actions/checkout@v4
@@ -120,18 +196,21 @@ jobs:
   #       service_account_key: ${{ env.GKE_SA_KEY }}
   #       export_default_credentials: true
 
-  #   - name: Verify Cluster Access
-  #     run: |
-  #         kubectl cluster-info
-  #         kubectl get nodes
+  #   - name: Setup Terraform
+  #     uses: hashicorp/setup-terraform@v3 # CHANGE: Consistent Terraform version
+  #     with:
+  #       terraform_version: "1.5.7"
 
     # - name: Terraform Destroy
     #   working-directory: ./terraform
     #   run: |
     #     terraform init
-    #     terraform workspace select $TF_WRKSPACE || terraform workspace new $TF_WORKSPACE
+    #     # CHANGE: Corrected typo: TF_WORKSPACE -> TF_WRKSPACE
+    #     terraform workspace select "$TF_WRKSPACE" || true # Select existing, or create (though destroy implies it exists)
     #     terraform destroy -auto-approve \
-    #                      -var="project_id=${{ env.PROJECT_ID }}" \
-    #                      -var="cluster_name=my-new-env"
+    #                       -var="project_id=${{ env.PROJECT_ID }}" \
+    #                       -var="cluster_name=my-new-env" \
+    #                       # --- CHANGE: Removed 'github_actions_cidrs' variable from destroy ---
+    #                       # -var="github_actions_cidrs=${{ steps.github_ips_destroy.outputs.cidrs }}"
     #     terraform workspace select default
-    #     terraform workspace delete $TF_WRKSPACE
+    #     terraform workspace delete "$TF_WRKSPACE"
